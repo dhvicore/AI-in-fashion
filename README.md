@@ -82,8 +82,8 @@ To switch to the real dataset, implement a `RestDataProvider` (backend API) or a
 | Member | Responsibilities |
 |---|---|
 | Dhvani Tandel | Frontend prototype, data model, mock AI engine, integration |
-| _Teammate 2_ | Backend |
-| _Teammate 3_ | Animations and UI polish |
+| Srishtee Varule | Backend |
+| Krishhma Vira | Animations and UI polish |
 
 ## Acknowledgements
 
