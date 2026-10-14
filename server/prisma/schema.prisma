@@ -1,0 +1,225 @@
+// Divara database schema.
+// SQLite for local development; switch the provider to "postgresql" for deployment.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  uploads      Upload[]
+  items        ClothingItem[]
+  profile      Profile?
+  favorites    Favorite[]
+  outfits      SavedOutfit[]
+  history      HistoryEntry[]
+  analyses     OutfitAnalysis[]
+  wardrobePhotos WardrobePhoto[]
+  calendar OutfitDay[]
+  assessments OutfitAssessment[]
+}
+
+// An image a user uploaded (wardrobe item or outfit photo).
+model Upload {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename  String   @unique
+  mimeType  String
+  size      Int
+  analysis  OutfitAnalysis?
+  wardrobePhoto WardrobePhoto?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// A piece of clothing in a user's digital wardrobe.
+model ClothingItem {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  category            String
+  subcategory         String
+  color               String
+  colorHex            String
+  pattern             String
+  style               String
+  seasons             Json // string[]
+  occasions           Json // string[]
+  gender              String
+  material            String
+  fit                 String
+  formalityScore      Int
+  trendScore          Int
+  comfortScore        Int
+  versatilityScore    Int
+  sustainabilityScore Int
+  deletedWithPhoto    Boolean   @default(false)
+  deletedAt           DateTime?
+  laundryStatus       String    @default("clean")
+  wearCount           Int       @default(0)
+  lastWornAt          DateTime?
+  imageUrl            String?
+  photoId             String?
+  recognitionIndex    Int?
+  photo               WardrobePhoto? @relation(fields: [photoId], references: [id], onDelete: SetNull)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+// Every uploaded photo has a persistent place in the user's closet, even before
+// clothing recognition completes. Identical files share one import per account.
+model WardrobePhoto {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId String @unique
+  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  imageHash String
+  source String @default("photo")
+  importedAt DateTime?
+  deletedAt DateTime?
+  items ClothingItem[]
+  createdAt DateTime @default(now())
+
+  @@unique([userId, imageHash])
+  @@index([userId])
+}
+
+// Answers from the style-profile questionnaire (stored as one JSON document).
+model Profile {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+// A favorited piece. itemId can be one of the user's items or a sample item id.
+model Favorite {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId    String
+  createdAt DateTime @default(now())
+
+  @@id([userId, itemId])
+}
+
+// An AI-generated outfit the user chose to keep.
+model SavedOutfit {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  occasion  String?
+  source    String
+  score     Json // OutfitScore
+  items     Json // ClothingItem[] snapshot
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// An outfit the user wore, for the style timeline and repetition detection.
+model HistoryEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  occasion  String
+  score     Int
+  feedback  String
+  items     Json // ClothingItem[] snapshot
+  image     String?
+  date      DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Actual local vision output, kept with its source photo for later review.
+model OutfitAnalysis {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId  String   @unique
+  upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  model     String
+  result    Json
+  imageHash String?
+  canonicalId String?
+  canonical OutfitAnalysis? @relation("CanonicalAnalysis", fields: [canonicalId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  duplicates OutfitAnalysis[] @relation("CanonicalAnalysis")
+  createdAt DateTime @default(now())
+  assessments OutfitAssessment[]
+
+  @@index([userId])
+  @@unique([userId, imageHash])
+}
+
+// Curated, versioned guidance is available offline. Numeric rules are Divara's
+// editorial interpretation; sources retain attribution rather than copied articles.
+model GuidanceSource {
+  id String @id
+  title String
+  url String
+  summary String
+  checkedAt String
+}
+
+model ClothingGuide {
+  id String @id
+  version String
+  kind String
+  key String
+  title String
+  summary String
+  data Json
+  sourceIds Json
+  @@unique([version, kind, key])
+}
+
+// A score belongs to confirmed clothing + context + rule version, not a camera
+// angle. Historical snapshots remain immutable when preferences change.
+model OutfitAssessment {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysisId String?
+  analysis OutfitAnalysis? @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+  fingerprint String
+  version String
+  garments Json
+  context Json
+  result Json
+  createdAt DateTime @default(now())
+  @@unique([userId, fingerprint])
+  @@index([userId, createdAt])
+}
+
+// One persistent outfit plan or worn record per account and local calendar date.
+model OutfitDay {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date String
+  label String
+  occasion String
+  items Json
+  wornAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId, date])
+}
