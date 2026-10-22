@@ -1,6 +1,6 @@
 export type PhotoSource = 'photo' | 'camera';
 export interface PhotoAnalysis {
-  garments: { name: string; color: string }[];
+  garments: { name: string; color: string; garmentKey?: string; bbox?: number[] | null; confidence?: number }[];
   score: number | null;
   summary: string;
   corrections: string[];
