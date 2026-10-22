@@ -5,7 +5,7 @@ export interface ScoreContext { styles:string[]; occasion:string; weather:string
 const normalize=(s:string)=>s.trim().toLowerCase().replace(/\s+/g,' ');
 const ALIASES:Record<string,string>={blush:'pink','denim blue':'blue',sky:'blue',emerald:'green',gray:'grey','light blue':'blue','dark blue':'navy',maroon:'burgundy','off white':'ivory','off-white':'ivory',tan:'camel',khaki:'beige','light brown':'camel','dark brown':'brown'};
 const PALETTE:Record<string,{neutral:boolean;hue:number}>=Object.fromEntries([
- ...['black','white','ivory','cream','grey','charcoal','beige','camel','brown','navy'].map(key=>[key,{neutral:true,hue:0}]),
+ ...['black','white','ivory','cream','grey','charcoal','beige','camel','brown','navy','silver','gold'].map(key=>[key,{neutral:true,hue:0}]),
  ...Object.entries({red:0,burgundy:345,pink:330,orange:30,rust:20,yellow:55,mustard:45,green:120,olive:80,sage:110,teal:175,blue:220,purple:280,lavender:270}).map(([key,hue])=>[key,{neutral:false,hue}]),
 ]);
 export const COLORS=Object.keys(PALETTE);
