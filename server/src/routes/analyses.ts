@@ -1,26 +1,13 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { Router } from 'express';
 import { z } from 'zod';
-import { env } from '../env.js';
 import { prisma } from '../lib/db.js';
 import { HttpError } from '../lib/errors.js';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { analyzePhoto, model, validateAnalysis } from '../vision/analyze.js';
-import { importAnalysis, syncWardrobePhotos } from '../wardrobe/photos.js';
-import { imageHash, reconcileAnalyses } from '../analysis/identity.js';
-import type { OutfitAnalysis, Upload } from '@prisma/client';
-
-function toEntry(row: OutfitAnalysis & { upload: Upload }) {
-  const analysis = validateAnalysis(row.result);
-  const metadata = row.result as { source?: unknown };
-  return { id: row.id, url: `/uploads/${row.upload.filename}`, createdAt: row.createdAt.toISOString(),
-    source: metadata.source === 'camera' ? 'camera' : 'photo', analysis };
-}
+import { reconcileAnalyses } from '../analysis/identity.js';
+import { analyzeUpload, toEntry } from '../analysis/service.js';
+import { enqueueAnalysis, kickWorker, jobView } from '../analysis/jobs.js';
 
 export const analysesRouter = Router();
-// Different uploads of identical bytes share both inference and its saved result.
-const pending = new Map<string, Promise<OutfitAnalysis & { upload: Upload }>>();
 analysesRouter.use(requireAuth);
 analysesRouter.get('/', async (req, res) => {
   await reconcileAnalyses(req.userId!);
@@ -33,6 +20,17 @@ analysesRouter.get('/', async (req, res) => {
   const page = rows.slice(0, limit);
   res.json({ entries: page.map(toEntry), nextCursor: rows.length > limit ? page.at(-1)?.id : null });
 });
+analysesRouter.post('/jobs',async(req,res)=>{
+ const {url,source,retry}=z.object({url:z.string().max(200),source:z.enum(['photo','camera']).default('photo'),retry:z.boolean().default(false)}).parse(req.body);
+ const job=await enqueueAnalysis(req.userId!,url,source,retry);
+ res.status(202).json({job:jobView(job)});
+});
+analysesRouter.get('/jobs/:id',async(req,res)=>{
+ const job=await prisma.analysisJob.findFirst({where:{id:req.params.id,userId:req.userId}});
+ if(!job)throw new HttpError(404,'Analysis job not found');
+ kickWorker();
+ res.json({job:jobView(job)});
+});
 analysesRouter.get('/:id', async (req, res) => {
   await reconcileAnalyses(req.userId!);
   let row = await prisma.outfitAnalysis.findFirst({ where: { id: String(req.params.id), userId: req.userId }, include: { upload: true } });
@@ -42,34 +40,6 @@ analysesRouter.get('/:id', async (req, res) => {
   res.json({ entry: toEntry(row) });
 });
 analysesRouter.post('/', async (req, res) => {
-  const { url, source } = z.object({ url: z.string().min(1).max(200), source: z.enum(['photo', 'camera']).default('photo') }).parse(req.body);
-  // Resolve only a recorded upload belonging to this account, never an arbitrary path or URL.
-  const upload = await prisma.upload.findFirst({ where: { userId: req.userId, filename: url.replace(/^\/uploads\//, '') } });
-  if (!upload || url !== `/uploads/${upload.filename}`) throw new HttpError(404, 'Photo not found');
-  const photo = await prisma.wardrobePhoto.findUnique({where:{uploadId:upload.id}});
-  if(photo?.deletedAt) throw new HttpError(409,'Restore this photo from Trash before analyzing it');
-  await reconcileAnalyses(req.userId!);
-  const bytes = await readFile(path.join(env.uploadDir, upload.filename));
-  const hash = imageHash(bytes);
-  const identity = { userId: req.userId!, imageHash: hash };
-  const cached = await prisma.outfitAnalysis.findUnique({ where: { userId_imageHash: identity }, include: { upload: true } });
-  if (cached) { await syncWardrobePhotos(req.userId!); const entry = toEntry(cached); res.json({ analysis: entry.analysis, entry, reused: true }); return; }
-  const key = `${req.userId}:${hash}`;
-  let task = pending.get(key);
-  const reused = Boolean(task);
-  if (!task) {
-    task = (async () => {
-      const analysis = await analyzePhoto(bytes);
-      return prisma.outfitAnalysis.upsert({ where: { userId_imageHash: identity },
-        create: { userId: req.userId!, uploadId: upload.id, model, imageHash: hash, result: { ...analysis, source } },
-        update: {}, include: { upload: true },
-      });
-    })();
-    pending.set(key, task);
-    void task.finally(() => { if (pending.get(key) === task) pending.delete(key); }).catch(() => {});
-  }
-  const saved = await task;
-  await importAnalysis(saved);
-  const entry = toEntry(saved);
-  res.json({ analysis: entry.analysis, entry, reused });
+ const {url,source}=z.object({url:z.string().min(1).max(200),source:z.enum(['photo','camera']).default('photo')}).parse(req.body);
+ res.json(await analyzeUpload(req.userId!,url,source));
 });

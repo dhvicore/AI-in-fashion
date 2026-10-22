@@ -11,6 +11,7 @@ import { prisma } from '../lib/db.js';
 import { HttpError } from '../lib/errors.js';
 import { detectImageType } from '../lib/images.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { enqueueAnalysis } from '../analysis/jobs.js';
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -52,7 +53,8 @@ uploadsRouter.post('/', upload.single('image'), async (req, res) => {
     await unlink(path.join(env.uploadDir, filename)).catch(() => {});
     throw err;
   });
-  res.status(201).json({ upload: toJson(saved) });
+  const job=process.env.AUTO_ANALYZE_UPLOADS==='false'?null:await enqueueAnalysis(req.userId!,`/uploads/${saved.filename}`,source).catch(()=>null);
+  res.status(201).json({ upload: toJson(saved),analysisJob:job?{id:job.id,status:job.status}:null });
 });
 
 // GET /api/uploads — the current user's images, newest first
@@ -69,7 +71,7 @@ uploadsRouter.delete('/:id', async (req, res) => {
   const found = await prisma.upload.findFirst({ where: { id: req.params.id, userId: req.userId } });
   if (!found) throw new HttpError(404, 'Image not found');
 
-  if (await prisma.clothingItem.findFirst({where:{userId:req.userId,imageUrl:`/uploads/${found.filename}`}})) throw new HttpError(409, 'Remove wardrobe pieces using this photo before deleting it');
+  if (await prisma.clothingItem.findFirst({where:{userId:req.userId,OR:[{imageUrl:`/uploads/${found.filename}`},{photo:{uploadId:found.id}}]}})) throw new HttpError(409, 'Remove wardrobe pieces using this photo before deleting it');
   await prisma.upload.delete({ where: { id: found.id } });
   await unlink(path.join(env.uploadDir, found.filename)).catch(() => {});
   res.status(204).end();
