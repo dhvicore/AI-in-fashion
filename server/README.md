@@ -256,3 +256,8 @@ The calendar integration check verifies status validation, persistence after
 returning login/API restart, ownership, Trash recovery, and preservation of
 unrelated item details. `scripts/check-real-wardrobe.ts` verifies laundry
 exclusion across multiple generator seeds and availability after washing.
+
+
+## Current recognition and conversational backend
+
+See [training/README.md](training/README.md) for background recognition jobs, individual crops, preserved garment illustrations, jewellery recommendations, local model chat, confirmed-label export, and the optional training/evaluation pipeline. No custom model is trained automatically.

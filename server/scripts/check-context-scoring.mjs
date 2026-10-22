@@ -7,7 +7,7 @@ import {PrismaClient} from '@prisma/client';
 const dir=await mkdtemp(path.join(tmpdir(),'divara-context-'));process.env.UPLOAD_DIR=dir;
 const {createApp}=await import('../src/app.ts');
 const {imageHash}=await import('../src/analysis/identity.ts');
-const {matchGarment}=await import('../src/scoring/knowledge.ts');
+const {matchGarment,GARMENTS}=await import('../src/scoring/knowledge.ts');
 const {evaluate,fingerprint}=await import('../src/scoring/score.ts');
 const prisma=new PrismaClient();const users=[];let server,base,cookie,email;
 const password='Local-demo-scoring-8234';
@@ -24,11 +24,12 @@ const garments=[{garmentKey:'tee',color:'white',style:'Casual',originalIndex:0},
 try{
  await start();const user=await account();const mainEmail=email;await ok('/profile',json(profile(['Casual']),'PUT'));
  const knowledge=await ok('/scoring/knowledge');
- assert.equal(knowledge.garments.length,32);assert.equal(knowledge.occasions.length,11);assert.equal(knowledge.weather.length,5);assert.equal(knowledge.sources.length,4);
+ assert.equal(knowledge.garments.length,GARMENTS.length);assert.equal(knowledge.occasions.length,11);assert.equal(knowledge.weather.length,5);assert.equal(knowledge.sources.length,4);
+ for(const key of ['earrings','necklace','bracelet','ring','bag'])assert.ok(knowledge.garments.some(g=>g.key===key));
  assert.equal((await ok('/scoring/colour-match',json({colors:['White','Black']}))).score,95);
  assert.equal((await ok('/scoring/colour-match',json({colors:['constructor','white']}))).score,null);
  assert.equal((await ok('/scoring/colour-match',json({colors:['Blush','Denim Blue','Emerald']}))).score===null,false);
- assert.equal(await prisma.clothingGuide.count({where:{version:knowledge.version}}),57);
+ assert.equal(await prisma.clothingGuide.count({where:{version:knowledge.version}}),GARMENTS.length+25);
  assert.equal(matchGarment('white t-shirt',knowledge.garments).key,'tee');assert.equal(matchGarment('rain jacket',knowledge.garments).key,'raincoat');
  const bytes=await readFile('../public/images/outfit-before.png'),first=await photo(bytes,'first.png');
  const a=await prisma.outfitAnalysis.create({data:{userId:user.id,uploadId:first.id,imageHash:imageHash(bytes),model:'fixture',result:{...recognition,source:'camera'}}});
@@ -64,5 +65,5 @@ try{
  assert.equal((await ok('/scoring/recommendations',json({context:{occasion:'Casual',weather:'Any',style:'Casual'}}))).items.length,0);
  const demo=await ok('/scoring/recommendations',json({includeSamples:true,context:{occasion:'Casual',weather:'Any',style:'Casual'}}));assert.ok(demo.items.length);assert.ok(demo.items.every(i=>!i.owned));
  cookie=undefined;assert.equal((await call('/scoring/knowledge')).status,401);
- console.log('PASS: 57 database rules; repeat/different-photo/wardrobe consistency; style/occasion/weather affect explained scores; immutable results survive login/restart; confirmed edits persist; partial/unknown inputs unscored; own clean suggestions and optional samples; account isolation.');
+ console.log('PASS: versioned database rules, including jewellery; repeat/different-photo/wardrobe consistency; style/occasion/weather affect explained scores; immutable results survive login/restart; confirmed edits persist; partial/unknown inputs unscored; own clean suggestions and optional samples; account isolation.');
 }finally{await stop();for(const id of users)await prisma.user.delete({where:{id}});await prisma.$disconnect();await rm(dir,{recursive:true,force:true});}
