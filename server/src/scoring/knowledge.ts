@@ -1,6 +1,6 @@
 import { prisma } from '../lib/db.js';
 import type { Prisma } from '@prisma/client';
-export const VERSION = 'divara-context-v3';
+export const VERSION = 'divara-context-v4';
 export const STYLES = ['Minimal','Casual','Chic','Streetwear','Formal','Sporty','Vintage'] as const;
 export const OCCASIONS = ['College','Office','Date','Party','Wedding','Travel','Casual','Formal','Interview','Workout','Outdoor'] as const;
 export const WEATHER = ['Any','Hot','Warm','Cool','Cold','Rainy'] as const;
@@ -46,7 +46,15 @@ export const GARMENTS:GarmentGuide[] = [
  garment('shoes','Shoes (general)','Shoes',['shoes','shoe'],['Casual','Minimal'],75,60),
  garment('scarf','Scarf','Accessories',['scarf'],['Vintage','Minimal','Chic'],40,85),
  garment('hat','Hat / cap','Accessories',['hat','cap'],['Casual','Sporty','Vintage'],90,70),
- garment('accessory','Accessory','Accessories',['bag','belt','socks','sock','watch','earrings','necklace','bracelet','sunglasses','accessory'],['Minimal','Casual','Chic'],80,70),
+ garment('bag','Bag / handbag','Accessories',['bag','handbag','purse','clutch','backpack','tote'],['Minimal','Chic','Formal','Casual'],85,85),
+ garment('belt','Belt','Accessories',['belt'],['Minimal','Formal','Casual'],85,85),
+ garment('watch','Watch','Accessories',['watch','wristwatch'],['Minimal','Formal','Casual'],85,85),
+ garment('earrings','Earrings','Accessories',['earrings','earring','studs','hoops'],['Chic','Formal','Minimal','Vintage'],85,85),
+ garment('necklace','Necklace','Accessories',['necklace','pendant','chain','choker'],['Chic','Formal','Minimal','Vintage'],85,85),
+ garment('bracelet','Bracelet / bangle','Accessories',['bracelet','bangle','bangles'],['Chic','Formal','Minimal','Vintage'],85,85),
+ garment('ring','Ring','Accessories',['ring','rings'],['Chic','Formal','Minimal','Vintage'],85,85),
+ garment('sunglasses','Sunglasses','Accessories',['sunglasses'],['Minimal','Casual','Chic'],95,70),
+ garment('accessory','Accessory','Accessories',['socks','sock','accessory','jewellery','jewelry'],['Minimal','Casual','Chic'],80,70),
 ];
 const OCCASION_DATA:Record<string,{recommended:string[];avoid:string[];note:string;sourceIds:string[]}> = {
  College:{recommended:['tee','shirt','polo','top','jeans','trousers','kurta','sneakers','cardigan'],avoid:['skirt','dress','gown','shorts','tank','saree'],note:'Campus preset excludes skirts, dresses and shorts as requested for this project; adapt it to your college dress code.',sourceIds:[]},
