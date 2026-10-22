@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ClothingItem } from '@/types/fashion';
 import { useApp } from '@/state/store';
 import { Heart, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { garmentSleeve } from '@/lib/garmentAppearance';
 
 // ---------------- helpers ----------------
 
@@ -189,8 +190,6 @@ export function shade(hex: string, pct: number): string {
 }
 
 export function GarmentArt({ item, className = '' }: { item: ClothingItem; className?: string }) {
-  // Use the same garment illustrations for samples and uploaded pieces.
-  // Source photos remain attached to the item for review and analysis.
   const base = item.colorHex;
   const dark = shade(base, -0.22);
   const light = shade(base, 0.28);
@@ -230,9 +229,23 @@ export function GarmentArt({ item, className = '' }: { item: ClothingItem; class
   const sw = 2.4;
   let shape: ReactNode = null;
   const sub = item.subcategory;
+  const sleeve=garmentSleeve(item);
+  const description=`${sub} ${item.product_name}`;
 
   switch (item.category) {
     case 'Tops':
+      if(sleeve==='strapless') {
+        shape=<g><path data-silhouette="strapless" d="M64 80 Q100 72 136 80 L128 142 L145 186 Q100 198 55 186 L72 142 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" /><path d="M70 142 Q100 149 130 142" fill="none" stroke={stroke} strokeWidth={1.5} opacity=".5" /></g>;
+        break;
+      }
+      if(sleeve==='sleeveless') {
+        shape=<g><path data-silhouette="sleeveless" d="M72 48 L85 48 Q100 80 115 48 L128 48 L128 80 Q128 103 140 112 L138 188 L62 188 L60 112 Q72 103 72 80 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" /><path d="M78 52 Q100 88 122 52" fill="none" stroke={stroke} strokeWidth={1.3} opacity=".5" /></g>;
+        break;
+      }
+      if(sleeve==='long'||sleeve==='unknown'&&/shirt|blouse|kurta/i.test(sub)&&!/\bt[ -]?shirt\b/i.test(sub)) {
+        shape=<g><path data-silhouette="long-sleeve" d="M70 52 L48 66 L30 174 L52 180 L64 100 L62 188 L138 188 L136 100 L148 180 L170 174 L152 66 L130 52 Q100 68 70 52 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />{/shirt|oxford|poplin|button/i.test(description)&&!/\b(?:sweatshirt|t[ -]?shirt)\b/i.test(description)?<><path d="M78 54 L100 72 L122 54 M100 72 L100 188" fill="none" stroke={stroke} strokeWidth={1.7} />{[94,116,138,160].map(y=><circle key={y} cx="100" cy={y} r="1.5" fill={dark} />)}</>:<path d="M78 54 Q100 67 122 54" fill="none" stroke={stroke} strokeWidth={sw} />}</g>;
+        break;
+      }
       shape = (
         <g>
           <path d="M70 52 L46 66 L34 104 L58 112 L62 96 L62 188 L138 188 L138 96 L142 112 L166 104 L154 66 L130 52 Q100 68 70 52 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
@@ -260,6 +273,10 @@ export function GarmentArt({ item, className = '' }: { item: ClothingItem; class
       );
       break;
     case 'Dresses':
+      if(sleeve==='strapless') {
+        shape=<g><path data-silhouette="strapless-dress" d="M72 64 Q100 56 128 64 L122 98 L152 184 Q100 202 48 184 L78 98 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" /><path d="M78 98 L122 98" stroke={stroke} strokeWidth={1.5} /></g>;
+        break;
+      }
       shape = (
         <g>
           <path d="M78 40 Q100 52 122 40 L132 92 L152 184 Q100 202 48 184 L68 92 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
@@ -295,13 +312,13 @@ export function GarmentArt({ item, className = '' }: { item: ClothingItem; class
           <path d="M112 56 L144 56 L144 128 L124 161 Q108 181 91 163 Q85 156 92 147 L112 121 Z" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />
           <path d="M66 58 L98 58 M112 68 L144 68" stroke={light} strokeWidth={3} opacity="0.7" />
         </g>
-      ) : /Handbag|Tote|Clutch|Crossbody/i.test(sub) ? (
+      ) : /Handbag|Tote|Clutch|Crossbody|\bBag\b/i.test(sub) ? (
         <g>
           <path d="M72 92 Q100 40 128 92" fill="none" stroke={stroke} strokeWidth={sw} />
           <rect x="56" y="92" width="88" height="72" rx="10" fill={fill} stroke={stroke} strokeWidth={sw} />
           <rect x="92" y="118" width="16" height="12" rx="2" fill={dark} />
         </g>
-      ) : /Scarf/i.test(sub) ? (
+      ) : /Earring/i.test(sub) ? <g>{[68,132].map(x=><g key={x}><circle cx={x} cy="76" r="6" fill={fill} stroke={stroke} strokeWidth={sw}/><ellipse cx={x} cy="119" rx="20" ry="31" fill="none" stroke={base} strokeWidth="8"/><ellipse cx={x} cy="119" rx="23" ry="34" fill="none" stroke={stroke} strokeWidth="1.5"/></g>)}</g> : /Necklace|Choker|Pendant/i.test(sub)?<g><path d="M58 62 C36 150 164 150 142 62" fill="none" stroke={stroke} strokeWidth="5"/><path d="M58 62 C36 150 164 150 142 62" fill="none" stroke={base} strokeWidth="2.5"/><path d="M100 127 L111 145 L100 162 L89 145 Z" fill={fill} stroke={stroke} strokeWidth={sw}/></g> : /Watch/i.test(sub)?<g><rect x="85" y="40" width="30" height="145" rx="9" fill={fill} stroke={stroke} strokeWidth={sw}/><circle cx="100" cy="112" r="29" fill={light} stroke={stroke} strokeWidth="4"/><path d="M100 94 L100 112 L114 120" stroke={stroke} strokeWidth={sw} fill="none"/></g> : /Ring/i.test(sub)?<g><circle cx="100" cy="125" r="29" fill="none" stroke={base} strokeWidth="9"/><circle cx="100" cy="125" r="34" fill="none" stroke={stroke} strokeWidth="1.5"/><path d="M85 87 L92 72 L108 72 L115 87 L100 103 Z" fill={light} stroke={stroke} strokeWidth={sw}/></g> : /Scarf/i.test(sub) ? (
         <g>
           <path d="M60 60 Q100 44 140 60 L132 96 Q100 82 68 96 Z" fill={fill} stroke={stroke} strokeWidth={sw} />
           <path d="M88 92 L80 170 L104 170 L100 90" fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" />

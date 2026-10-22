@@ -41,6 +41,10 @@ export interface ClothingItem {
   needs_review?: boolean;
   laundry_status?: 'clean' | 'in-laundry';
   owned?: boolean; // true = saved in the user's account; sample items leave it unset
+  source_image_url?: string | null;
+  labels_confirmed?: boolean;
+  sleeve?: 'strapless' | 'sleeveless' | 'short' | 'long' | 'unknown';
+  recognition?: { confidence?: number; bbox?: number[] | null; cropped?: boolean; sourceImageUrl?: string; sleeve?: 'strapless' | 'sleeveless' | 'short' | 'long' | 'unknown' } | null;
 }
 
 export interface ScoreBreakdown {
