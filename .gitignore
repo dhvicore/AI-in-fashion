@@ -29,3 +29,10 @@ dist-ssr
 # scratch / unrelated
 tmp/
 output/
+
+# Local training runtime, downloaded datasets and generated checkpoints
+.venv-training/
+server/training/data/
+server/training/runs/
+server/models/
+**/__pycache__/
