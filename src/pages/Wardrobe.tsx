@@ -12,11 +12,17 @@ import { PhotoUpload } from '@/components/PhotoUpload';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { createPortal } from 'react-dom';
 import { api, errorMessage } from '@/lib/api';
+import { garmentSleeve, type Sleeve } from '@/lib/garmentAppearance';
 
 const CATEGORIES = ['All', 'Tops', 'Bottoms', 'Dresses', 'Shoes', 'Accessories', 'Outerwear', 'Uncategorized'];
 
 export default function Wardrobe() {
   const { wardrobe, myItems, wardrobePhotos, addItem, updateItem, deleteItem, restoreItem, refreshWardrobe, loadingData, go, setAnalyzerImage } = useApp();
+  useEffect(()=>{
+    if(!wardrobePhotos.some(photo=>photo.status==='needs-analysis'))return;
+    const timer=setInterval(()=>{void refreshWardrobe().catch(()=>{});},5000);
+    return ()=>clearInterval(timer);
+  },[wardrobePhotos,refreshWardrobe]);
   const [scope, setScope] = useState<'all' | 'mine' | 'samples'>('all');
   const [laundry, setLaundry] = useState('all');
   const [sort, setSort] = useState('default');
@@ -66,7 +72,7 @@ export default function Wardrobe() {
         <span className="closet-note">wear. remix. repeat.</span>
       </div>
     </section>
-    <p className="mb-6 text-sm leading-relaxed text-soot">Your photos and reviewed clothes stay in your account. Samples are labeled for inspiration; illustrations use each piece’s saved category and colour.</p>
+    <p className="mb-6 text-sm leading-relaxed text-soot">Your photos and reviewed clothes stay in your account. Illustrations use each piece’s saved category, colour and sleeve details. Review source photos and correct labels in Edit details.</p>
     <WardrobeRecovery />
     {error && <div role="alert" className="mb-4 text-sm text-wine"><p>{error}</p><button className="mt-2 underline" onClick={reload}>Retry loading wardrobe</button></div>}
     {pendingPhotos.length > 0 && <section className="mb-8"><h2 className="font-display text-2xl">Photos waiting for details</h2><div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -80,7 +86,7 @@ export default function Wardrobe() {
     <div className="mb-4 flex gap-2">{(['all', 'mine', 'samples'] as const).map(value => <Chip key={value} label={value === 'all' ? 'Everything' : value === 'mine' ? 'My clothes' : 'Samples'} active={scope === value} onClick={() => setScope(value)} />)}</div>
     <div className="mb-6 flex flex-wrap gap-2">{CATEGORIES.map(category=><Chip key={category} label={category} active={(query.category ?? 'All') === category} onClick={()=>setQuery(q=>({...q,category}))} />)}</div>
     <p className="mb-4 text-xs text-soot">{loadingData ? 'Loading your wardrobe…' : `${items.length} showing · ${myItems.length} saved pieces · ${wardrobe.length - myItems.length} samples · ${wardrobePhotos.length} photos · ${myItems.filter(item => item.laundry_status === 'in-laundry').length} in laundry`}</p>
-    <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">{items.map(item=><div key={item.item_id} className="closet-piece"><ItemCard item={item} onAnalyze={item.owned ? ()=>{if(item.image_url)setAnalyzerImage(item.image_url);else setAnalyzerImage(null);go('analyze');} : undefined} onDelete={item.owned ? setRemoving : undefined} />{item.owned && <><LaundryControl item={item} /><button className="mt-3 text-sm font-semibold text-wine" onClick={()=>{setEditing(item);setAdding(true);}}>{item.needs_review ? 'Review piece details' : 'Edit details'}</button><WearControl item={item} onSaved={refreshWardrobe} /></>}</div>)}</div>
+    <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">{items.map(item=><div key={item.item_id} className="closet-piece"><ItemCard item={item} onAnalyze={item.owned ? ()=>{if(item.source_image_url??item.image_url)setAnalyzerImage(item.source_image_url??item.image_url??null);else setAnalyzerImage(null);go('analyze');} : undefined} onDelete={item.owned ? setRemoving : undefined} />{item.owned && <><LaundryControl item={item} />{item.recognition&&<ConfirmLabels item={item} onSaved={refreshWardrobe} />}<button className="mt-3 text-sm font-semibold text-wine" onClick={()=>{setEditing(item);setAdding(true);}}>{item.needs_review ? 'Review piece details' : 'Edit details'}</button><WearControl item={item} onSaved={refreshWardrobe} /></>}</div>)}</div>
     {!loadingData && !items.length && <div className="mt-6 rounded border border-dashed border-charcoal/25 p-10 text-center"><p className="font-display text-2xl">{wardrobe.length ? 'No pieces match your search.' : 'Start with your own clothes.'}</p><p className="mt-3 text-sm text-soot">{filtersActive ? 'Try another search or clear your filters to see more clothes.' : 'Upload an outfit or garment photo. Recognized clothes will appear here with your photo.'}</p>{filtersActive && <button className="btn-stroke mt-5" onClick={resetFilters}>Show all pieces</button>}</div>}
     {removing && createPortal(<div role="dialog" aria-modal="true" aria-labelledby="remove-piece-title" className="fixed inset-0 z-50 flex items-center justify-center bg-panel/50 p-4"><div className="w-full max-w-sm rounded bg-ivory p-6"><h2 id="remove-piece-title" className="font-display text-2xl">Move piece to Trash?</h2><p className="mt-3 text-sm">{removing.product_name} can be restored with Undo or from Trash.</p><div className="mt-5 flex gap-3"><button disabled={deleting} className="btn-stroke" onClick={()=>setRemoving(undefined)}>Cancel</button><button disabled={deleting} className="btn-solid" onClick={()=>void remove(removing)}>{deleting?'Removing…':'Move to Trash'}</button></div></div></div>, document.body)}
     <Dialog open={uploading} onOpenChange={setUploading}>
@@ -122,6 +128,7 @@ function AddItemPanel({ onClose, onAdd, initial, imageUrl = null }: { onClose: (
   const [style, setStyle] = useState(initial?.style ?? 'Minimal');
   const [pattern, setPattern] = useState(initial?.pattern ?? 'Solid');
   const [occasion, setOccasion] = useState(initial?.occasion[0] ?? 'Casual');
+  const [sleeve,setSleeve]=useState<Sleeve>(initial?garmentSleeve(initial):'unknown');
   const [material, setMaterial] = useState(initial?.material ?? 'Cotton');
   const [seasons, setSeasons] = useState<string[]>(initial?.season ?? ['Spring', 'Summer']);
   const [saving, setSaving] = useState(false);
@@ -148,7 +155,8 @@ function AddItemPanel({ onClose, onAdd, initial, imageUrl = null }: { onClose: (
         occasion: [occasion],
         gender: initial?.gender ?? 'Unisex',
         material: material.trim() || 'Cotton',
-        fit: FITS[1],
+        fit: initial?.fit??FITS[1],
+        sleeve,
         formality_score: FORMALITY[style] ?? 50,
         trend_score: initial?.trend_score ?? 50,
         comfort_score: initial?.comfort_score ?? 50,
@@ -173,6 +181,7 @@ function AddItemPanel({ onClose, onAdd, initial, imageUrl = null }: { onClose: (
         </div>
         <div className="mt-5 space-y-4">
           {(initial?.image_url || imageUrl) && <img src={initial?.image_url ?? imageUrl!} alt="Source garment photo" className="mx-auto max-h-44 rounded object-contain" />}
+          <label className="block"><span className="label-caps mb-1 block text-soot/60">Sleeves</span><select aria-label="Sleeve details" value={sleeve} onChange={e=>setSleeve(e.target.value as Sleeve)} className={field}><option value="unknown">Not specified</option><option value="strapless">Strapless</option><option value="sleeveless">Sleeveless</option><option value="short">Short sleeves</option><option value="long">Long sleeves</option></select></label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Item name — e.g. Ivory Silk Blouse" className="w-full rounded-sm border border-charcoal/20 bg-surface px-3 py-2.5 text-[13px] outline-none focus:border-wine" />
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
@@ -232,4 +241,11 @@ function AddItemPanel({ onClose, onAdd, initial, imageUrl = null }: { onClose: (
       </div>
     </div>, document.body)
   );
+}
+
+function ConfirmLabels({item,onSaved}:{item:ClothingItem;onSaved:()=>Promise<void>}) {
+ const [saving,setSaving]=useState(false);
+ const confirm=async()=>{setSaving(true);try{await api.post(`/items/${item.item_id}/confirm`);await onSaved();toast.success('Labels confirmed');}catch(e){toast.error(errorMessage(e));}finally{setSaving(false);}};
+ if(item.labels_confirmed)return <p className="mt-3 text-xs text-sage">Labels confirmed by you</p>;
+ return <div className="mt-3 text-xs"><p className="text-soot">{(item.recognition?.confidence??1)<0.55?'Uncertain detection — review the source photo and name.':'Review the source photo, clothing type and colour.'}</p><details className="mt-2"><summary className="cursor-pointer text-wine">Review source photo</summary><img src={item.image_url??undefined} alt={item.product_name} className="mt-2 h-36 w-full object-contain" /></details><button disabled={saving} className="mt-2 font-semibold text-wine disabled:opacity-50" onClick={()=>void confirm()}>{saving?'Saving…':'Confirm these labels'}</button></div>;
 }
