@@ -1,9 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { OutfitAnalysis, Prisma, Upload } from '@prisma/client';
 import { prisma } from '../lib/db.js';
 import { env } from '../env.js';
 import { imageHash, reconcileAnalyses } from '../analysis/identity.js';
+import sharp from 'sharp';
+import { matchGarment, GARMENTS } from '../scoring/knowledge.js';
+import { canonicalColor } from '../scoring/score.js';
 import { validateAnalysis } from '../vision/analyze.js';
 
 export function registerPhoto(tx: Prisma.TransactionClient, upload: Upload, hash: string, source: string) {
@@ -17,10 +20,10 @@ export function garmentCategory(name: string) {
   if (/\b(shoe|shoes|sneaker|sneakers|boot|boots|heel|heels|sandal|sandals|loafer|loafers|trainer|trainers)\b/i.test(name)) return 'Shoes';
   if (/\b(pants|trousers|jeans|skirt|shorts|leggings|bottom|bottoms)\b/i.test(name)) return 'Bottoms';
   if (/\b(shirt|t-shirt|tee|top|blouse|sweater|hoodie|tank|polo|turtleneck|kurta)\b/i.test(name)) return 'Tops';
-  if (/\b(bag|handbag|purse|backpack|belt|sock|socks|scarf|hat|cap|watch|earrings|necklace|bracelet|sunglasses)\b/i.test(name)) return 'Accessories';
+  if (/\b(bag|handbag|purse|backpack|belt|sock|socks|scarf|hat|cap|watch|earrings|necklace|bracelet|sunglasses|ring|rings|jewellery|jewelry|clutch|bangle|bangles|choker|pendant)\b/i.test(name)) return 'Accessories';
   return 'Uncategorized';
 }
-const colors: Record<string, string> = { black:'#1C1C1C', white:'#F5F4EF', ivory:'#EEE8DA', camel:'#B88B5A', brown:'#795548', beige:'#D8C5A5', navy:'#233A59', blue:'#527DA7', red:'#B93636', burgundy:'#6E1E3C', maroon:'#6E1E3C', green:'#55764C', grey:'#888888', gray:'#888888', pink:'#DFA8B0', yellow:'#D8B94B', purple:'#79558C', orange:'#CE8745', cream:'#F2EBDD' };
+const colors: Record<string, string> = { black:'#1C1C1C', white:'#F5F4EF', ivory:'#EEE8DA', camel:'#B88B5A', brown:'#795548', beige:'#D8C5A5', navy:'#233A59', blue:'#527DA7', red:'#B93636', burgundy:'#6E1E3C', maroon:'#6E1E3C', green:'#55764C', grey:'#888888', gray:'#888888', pink:'#DFA8B0', yellow:'#D8B94B', purple:'#79558C', orange:'#CE8745', cream:'#F2EBDD',gold:'#D4AF37',silver:'#C0C0C0' };
 function colorHex(color: string) { return colors[color.toLowerCase()] ?? Object.entries(colors).find(([name]) => color.toLowerCase().includes(name))?.[1] ?? '#808080'; }
 const title = (text: string) => text.replace(/\b\w/g, c => c.toUpperCase());
 
@@ -29,17 +32,51 @@ export async function importAnalysis(row: OutfitAnalysis) {
   if (!analysis.garments.length || !row.imageHash) return;
   const photo = await prisma.wardrobePhoto.findUnique({ where: { userId_imageHash: { userId: row.userId, imageHash: row.imageHash } }, include: { upload: true } });
   if (!photo || photo.deletedAt || photo.importedAt) return;
-  await prisma.$transaction(async tx => {
-    // This gate prevents duplicate pieces on concurrent/repeated analysis requests.
-    const claimed = await tx.wardrobePhoto.updateMany({ where: { id: photo.id, importedAt: null, deletedAt:null }, data: { importedAt: new Date() } });
-    if (!claimed.count) return;
-    await tx.clothingItem.createMany({ data: analysis.garments.map((garment, recognitionIndex) => ({
-      userId: row.userId, photoId: photo.id, recognitionIndex, name: title(`${garment.color} ${garment.name}`).slice(0,100),
-      category: garmentCategory(garment.name), subcategory: title(garment.name).slice(0,60), color: title(garment.color).slice(0,60), colorHex: colorHex(garment.color),
-      imageUrl: `/uploads/${photo.upload.filename}`, pattern:'Unknown', style:'Unknown', seasons:[], occasions:[], gender:'Unisex', material:'Unknown', fit:'Unknown',
-      formalityScore:50, trendScore:50, comfortScore:50, versatilityScore:50, sustainabilityScore:50,
-    })) });
-  });
+  const createdFiles:string[]=[];
+  let claimed=false;
+  try {
+    const original=await readFile(path.join(env.uploadDir,photo.upload.filename)).catch(()=>null);
+    const rotated=original?await sharp(original,{limitInputPixels:40_000_000}).rotate().toBuffer().catch(()=>null):null;
+    const metadata=rotated?await sharp(rotated).metadata():null;
+    const pieces=await Promise.all(analysis.garments.map(async(garment,recognitionIndex)=>{
+      const guide=GARMENTS.find(g=>g.key===garment.garmentKey)??matchGarment(garment.name,GARMENTS);
+      let imageUrl=`/uploads/${photo.upload.filename}`;
+      let cropped=false;
+      const box=garment.bbox;
+      if(rotated&&metadata?.width&&metadata.height&&box&&box[2]>box[0]&&box[3]>box[1]) {
+        const left=Math.floor(box[0]/1000*metadata.width),top=Math.floor(box[1]/1000*metadata.height);
+        const right=Math.min(metadata.width,Math.ceil(box[2]/1000*metadata.width)),bottom=Math.min(metadata.height,Math.ceil(box[3]/1000*metadata.height));
+        if(right-left>=8&&bottom-top>=8) {
+          const filename=`${photo.id}-${recognitionIndex}.jpg`;
+          await mkdir(env.uploadDir,{recursive:true});
+          const crop=await sharp(rotated).extract({left,top,width:right-left,height:bottom-top}).resize({width:640,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:90}).toBuffer();
+          await writeFile(path.join(env.uploadDir,filename),crop);
+          createdFiles.push(filename);imageUrl=`/uploads/${filename}`;cropped=true;
+        }
+      }
+      return {userId:row.userId,photoId:photo.id,recognitionIndex,name:title(`${garment.color} ${garment.name}`).slice(0,100),
+        category:guide?.category??garmentCategory(garment.name),subcategory:guide?.title??title(garment.name).slice(0,60),color:canonicalColor(garment.color),colorHex:colorHex(canonicalColor(garment.color)),
+        recognition:{...garment,cropped,pipeline:'grounded-v1',model:row.model,sourceImageUrl:`/uploads/${photo.upload.filename}`} as Prisma.InputJsonValue,
+        imageUrl,pattern:'Unknown',style:'Unknown',seasons:[],occasions:[],gender:'Unisex',material:'Unknown',fit:'Unknown',
+        formalityScore:50,trendScore:50,comfortScore:50,versatilityScore:50,sustainabilityScore:50};
+    }));
+    await prisma.$transaction(async tx=>{
+      const gate=await tx.wardrobePhoto.updateMany({where:{id:photo.id,importedAt:null,deletedAt:null},data:{importedAt:new Date()}});
+      if(!gate.count)return;
+      claimed=true;
+      await tx.clothingItem.createMany({data:pieces});
+    });
+  } catch(error) {
+    // Don't leave orphan crops when importing fails. Concurrent import calls
+    // share deterministic crop names; retain files if another caller saved them.
+    const saved=await prisma.wardrobePhoto.findUnique({where:{id:photo.id}});
+    if(!saved?.importedAt)await Promise.all(createdFiles.map(name=>unlink(path.join(env.uploadDir,name)).catch(()=>{})));
+    throw error;
+  }
+  if(!claimed) {
+    const saved=await prisma.wardrobePhoto.findUnique({where:{id:photo.id}});
+    if(!saved?.importedAt)await Promise.all(createdFiles.map(name=>unlink(path.join(env.uploadDir,name)).catch(()=>{})));
+  }
 }
 
 const syncing = new Map<string, Promise<void>>();
