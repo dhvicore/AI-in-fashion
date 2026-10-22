@@ -27,6 +27,8 @@ model User {
   wardrobePhotos WardrobePhoto[]
   calendar OutfitDay[]
   assessments OutfitAssessment[]
+  analysisJobs AnalysisJob[]
+  trainingExamples TrainingExample[]
 }
 
 // An image a user uploaded (wardrobe item or outfit photo).
@@ -40,6 +42,7 @@ model Upload {
   analysis  OutfitAnalysis?
   wardrobePhoto WardrobePhoto?
   createdAt DateTime @default(now())
+  analysisJobs AnalysisJob[]
 
   @@index([userId])
 }
@@ -74,10 +77,42 @@ model ClothingItem {
   imageUrl            String?
   photoId             String?
   recognitionIndex    Int?
+  recognition         Json?
+  labelsConfirmedAt   DateTime?
+  trainingExample     TrainingExample?
   photo               WardrobePhoto? @relation(fields: [photoId], references: [id], onDelete: SetNull)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  @@index([userId])
+}
+
+// Durable jobs keep image inference independent of a browser request lifetime.
+model AnalysisJob {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId String
+  upload Upload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  source String
+  status String @default("queued")
+  error String?
+  analysisId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId, uploadId])
+  @@index([status, createdAt])
+}
+
+// Human-confirmed labels are separate from unverified model predictions.
+model TrainingExample {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId String @unique
+  item ClothingItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  labels Json
+  confirmedAt DateTime @default(now())
   @@index([userId])
 }
 
