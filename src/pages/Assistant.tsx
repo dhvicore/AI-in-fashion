@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { SendHorizonal, Sparkles } from 'lucide-react';
 import { useApp } from '@/state/store';
-import { assistantRespond, derivePersonality } from '@/engine/ai';
 import type { ClothingItem } from '@/types/fashion';
 import { GarmentArt, ScoreRing } from '@/components/divara';
 
 import { api, errorMessage } from '@/lib/api';
-import type { Assessment } from '@/types/scoring';
 
 interface Msg {
   role: 'user' | 'divara';
   text: string;
   outfitItems?: ClothingItem[];
   score?: number;
+}
+
+interface ConversationState {
+  itemIds: string[];
+  context: { occasion: string; weather: string; styles: string[] };
+  targetId?: string;
 }
 
 const SUGGESTED = [
@@ -25,12 +29,15 @@ const SUGGESTED = [
 ];
 
 export default function Assistant() {
-  const { myItems: wardrobe, profile } = useApp();
-  const personality = derivePersonality(wardrobe, profile);
+  const { wardrobe } = useApp();
+  const conversation = useRef<ConversationState | undefined>(undefined);
+  const sending = useRef(false);
+  const [modelStatus,setModelStatus]=useState('Checking local model…');
+  useEffect(()=>{let active=true;void api.get<{available:boolean;chatInstalled:boolean}>('/health/models').then(h=>{if(active)setModelStatus(h.available&&h.chatInstalled?'Local model connected · wardrobe tools ready':'Local model unavailable · wardrobe tools ready');}).catch(()=>{if(active)setModelStatus('Backend connection unavailable');});return()=>{active=false;};},[]);
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: 'divara',
-      text: wardrobe.length ? `Hi — I’m Divara. I can suggest looks from your ${wardrobe.length} saved pieces. Ask me what to wear for an occasion.` : 'Welcome! Add your clothes in My Closet or Analyze Outfit first, and I can suggest looks from your saved pieces.',
+      text: wardrobe.length ? `Hi — I’m Divara. I can suggest looks from the ${wardrobe.length} pieces in My Closet, including samples and your saved clothes. Ask me what to wear for an occasion.` : 'Welcome! Add your clothes in My Closet or Analyze Outfit first, and I can suggest looks from your saved pieces.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -43,36 +50,33 @@ export default function Assistant() {
 
   const send = (text: string) => {
     const msg = text.trim();
-    if (!msg || typing) return;
+    if (!msg || sending.current) return;
     setMessages((m) => [...m, { role: 'user', text: msg }]);
     setInput('');
     setTyping(true);
-    void (async()=>{
+    sending.current = true;
+    void (async () => {
       try {
-        if (/color|fix/.test(msg.toLowerCase())) {
-          const reply=assistantRespond(msg,wardrobe,personality);
-          setMessages(m=>[...m,{role:'divara',...reply}]);
-        } else {
-          const text=msg.toLowerCase();
-          const occasion=/wedding/.test(text)?'Wedding':/interview/.test(text)?'Interview':/office|work/.test(text)?'Office':/formal/.test(text)?'Formal':/date|dinner/.test(text)?'Date':/party/.test(text)?'Party':/travel/.test(text)?'Travel':/college/.test(text)?'College':/workout|gym/.test(text)?'Workout':/hike|outdoor/.test(text)?'Outdoor':'Casual';
-          const weather=/rain/.test(text)?'Rainy':/cold/.test(text)?'Cold':/hot|heat/.test(text)?'Hot':/cool/.test(text)?'Cool':/warm/.test(text)?'Warm':'Any';
-          // Dress the suggestion to the occasion so it reads right even before the
-          // user has set a style profile (a wedding should pull a formal look).
-          const styleForOccasion:Record<string,string|undefined>={Wedding:'Formal',Formal:'Formal',Interview:'Formal',Party:'Chic',Date:'Chic',Office:'Minimal',Workout:'Sporty'};
-          const style=profile?.styles?.length?undefined:styleForOccasion[occasion];
-          const context={occasion,weather,...(style?{style}:{})};
-          // Draw on the sample collection too, so every occasion has a sensible
-          // look to show — unless the user explicitly asks for their own closet.
-          const ownOnly=/(only|just).{0,12}(my|own).{0,6}(wardrobe|closet|clothes)|my wardrobe only/.test(text);
-          const reply=await api.post<{items:ClothingItem[];note:string}>('/scoring/recommendations',{context,includeSamples:!ownOnly,seed:Math.floor(Math.random()*1000000)});
-          let score:number|undefined;
-          // automatic:true lets the score use each piece's style affinity and fall
-          // back to a sensible default, so a look always gets a number.
-          if(reply.items.length){const r=await api.post<{assessment:Assessment}>('/scoring/assessments',{automatic:true,itemIds:reply.items.map(i=>i.item_id),context});score=r.assessment.score??undefined;}
-          setMessages(m=>[...m,{role:'divara',text:reply.note,outfitItems:reply.items.length?reply.items:undefined,score}]);
-        }
-      } catch(e){setMessages(m=>[...m,{role:'divara',text:errorMessage(e)}]);}
-      finally{setTyping(false);}
+        const reply = await api.post<{
+          items: ClothingItem[];
+          note: string;
+          score: number | null;
+          state: ConversationState;
+          modelWarning?: string;
+        }>('/assistant', { message: msg, state: conversation.current, history: messages.slice(-8).map(m=>({role:m.role==='divara'?'assistant':'user',content:m.text.slice(0,2000)})) }, AbortSignal.timeout(300_000));
+        conversation.current = reply.state;
+        setMessages(m => [...m, {
+          role: 'divara',
+          text: reply.modelWarning ? `${reply.note}\n\nConversational model unavailable: ${reply.modelWarning}` : reply.note,
+          outfitItems: reply.items.length ? reply.items : undefined,
+          score: reply.score ?? undefined,
+        }]);
+      } catch (e) {
+        setMessages(m => [...m, { role: 'divara', text: errorMessage(e) }]);
+      } finally {
+        sending.current = false;
+        setTyping(false);
+      }
     })();
   };
 
@@ -86,7 +90,7 @@ export default function Assistant() {
           </div>
           <div>
             <h1 className="font-display text-2xl leading-none">Divara AI</h1>
-            <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-soot/60">Your conversational stylist</p>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-soot/60">{modelStatus}</p>
           </div>
         </div>
         <Sparkles size={18} className="text-gold" />
@@ -111,7 +115,7 @@ export default function Assistant() {
                   {m.score != null && (
                     <div className="flex items-center gap-4 bg-panel px-4 py-3 text-cream">
                       <ScoreRing score={m.score} size={52} dark />
-                      <p className="text-[12px] text-cream/80">Personal compatibility score — saved with your preferences and outing</p>
+                      <p className="text-[12px] text-cream/80">Personal compatibility score for this outfit and occasion</p>
                     </div>
                   )}
                 </div>

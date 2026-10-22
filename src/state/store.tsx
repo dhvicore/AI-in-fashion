@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { toast } from 'sonner';
 import type { ClothingItem, HistoryEntry, Outfit, UserProfile, WardrobePhoto } from '@/types/fashion';
 import { api, errorMessage } from '@/lib/api';
-import { DUMMY_DATASET } from '@/data/dataset';
 import { useAuth } from '@/state/auth';
 import type { PhotoSource } from '@/types/photoAnalysis';
 
@@ -63,6 +62,7 @@ const Ctx = createContext<AppState | null>(null);
 interface UserData {
   userId: string;
   myItems: ClothingItem[];
+  sampleItems: ClothingItem[];
   wardrobePhotos: WardrobePhoto[];
   profile: UserProfile | null;
   favorites: string[];
@@ -70,7 +70,7 @@ interface UserData {
   history: HistoryEntry[];
 }
 
-const emptyData = (userId: string): UserData => ({ userId, myItems: [], wardrobePhotos: [], profile: null, favorites: [], savedOutfits: [], history: [] });
+const emptyData = (userId: string): UserData => ({ userId, myItems: [], sampleItems: [], wardrobePhotos: [], profile: null, favorites: [], savedOutfits: [], history: [] });
 const NO_DATA = emptyData('');
 
 function reportError(action: string) {
@@ -94,7 +94,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [userId]);
   const current = data && data.userId === userId ? data : null;
   const loadingData = Boolean(userId) && !current;
-  const { myItems, wardrobePhotos = [], profile, favorites, savedOutfits, history } = current ?? NO_DATA;
+  const { myItems, sampleItems = [], wardrobePhotos = [], profile, favorites, savedOutfits, history } = current ?? NO_DATA;
 
   // Apply a change to the current user's data (no-op if they logged out meanwhile).
   const update = useCallback(
@@ -111,12 +111,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api.get<{ favorites: string[] }>('/favorites'),
       api.get<{ outfits: Outfit[] }>('/outfits'),
       api.get<{ history: HistoryEntry[] }>('/history'),
+      api.get<{ items: ClothingItem[] }>('/items/samples'),
     ])
-      .then(([items, prof, favs, outfits, hist]) => {
+      .then(([items, prof, favs, outfits, hist, samples]) => {
         if (cancelled) return;
         setData({
           userId,
           myItems: items.items,
+          sampleItems: samples.items,
           wardrobePhotos: items.photos,
           profile: prof.profile,
           favorites: favs.favorites,
@@ -166,7 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entered,
       enter: () => setEntered(true),
       loadingData,
-      wardrobe: [...myItems, ...DUMMY_DATASET.map(item => ({ ...item, owned: false }))],
+      wardrobe: [...myItems, ...sampleItems],
       wardrobePhotos,
       refreshWardrobe,
       updateItem: async (id, input) => {
@@ -226,7 +228,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       analyzerSource,
       setAnalyzerImage,
     }),
-    [page, entered, loadingData, myItems, wardrobePhotos, refreshWardrobe, profile, favorites, savedOutfits, toggleFavorite, history, analyzerImage, analyzerSource, setAnalyzerImage, update],
+    [page, entered, loadingData, myItems, sampleItems, wardrobePhotos, refreshWardrobe, profile, favorites, savedOutfits, toggleFavorite, history, analyzerImage, analyzerSource, setAnalyzerImage, update],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
