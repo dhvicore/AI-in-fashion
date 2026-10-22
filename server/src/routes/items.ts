@@ -5,6 +5,8 @@ import { syncWardrobePhotos, wardrobePhotoList } from '../wardrobe/photos.js';
 import { prisma } from '../lib/db.js';
 import { HttpError } from '../lib/errors.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { confirmLabels } from '../training/labels.js';
+import { SAMPLE_ITEMS } from '../data/samples.js';
 
 const CATEGORIES = ['Tops', 'Bottoms', 'Dresses', 'Shoes', 'Accessories', 'Outerwear', 'Uncategorized'] as const;
 const text = z.string().trim().min(1).max(60);
@@ -30,6 +32,7 @@ const itemSchema = z.object({
   versatility_score: score.default(50),
   sustainability_score: score.default(50),
   laundry_status: z.enum(['clean', 'in-laundry']).optional(),
+  sleeve: z.enum(['strapless','sleeveless','short','long','unknown']).optional(),
   image_url: z
     .string()
     .regex(/^\/uploads\/[\w-]+\.(jpg|png|webp)$/, 'image_url must come from /api/uploads')
@@ -92,6 +95,10 @@ export function toClient(item: ClothingItem) {
     laundry_status: item.laundryStatus,
     photo_id: item.photoId,
     needs_review: item.category === 'Uncategorized' || item.material === 'Unknown' || item.style === 'Unknown',
+    recognition: item.recognition as {confidence?:number;bbox?:number[];cropped?:boolean;sourceImageUrl?:string}|null,
+    labels_confirmed: Boolean(item.labelsConfirmedAt),
+    source_image_url: (item.recognition as {sourceImageUrl?:string}|null)?.sourceImageUrl??item.imageUrl,
+    sleeve: (item.recognition as {sleeve?:string}|null)?.sleeve??'unknown',
   };
 }
 
@@ -114,6 +121,7 @@ async function findOwnItem(userId: string, id: string) {
 
 export const itemsRouter = Router();
 itemsRouter.use(requireAuth);
+itemsRouter.get('/samples',(_req,res)=>res.json({items:SAMPLE_ITEMS.map(item=>({...item,owned:false}))}));
 
 itemsRouter.get('/', async (req, res) => {
   await syncWardrobePhotos(req.userId!);
@@ -129,7 +137,7 @@ itemsRouter.post('/', async (req, res) => {
   const upload = await assertOwnImage(req.userId!, input.image_url);
   const photo = upload ? await prisma.wardrobePhoto.findUnique({ where: { uploadId: upload.id } }) : null;
   const item = await prisma.$transaction(async tx => {
-    const item = await tx.clothingItem.create({ data: { ...(toDb(input) as Omit<Prisma.ClothingItemUncheckedCreateInput, 'userId'>), userId: req.userId!, photoId: photo?.id } });
+    const item = await tx.clothingItem.create({ data: { ...(toDb(input) as Omit<Prisma.ClothingItemUncheckedCreateInput, 'userId'>), userId: req.userId!, photoId: photo?.id,...(input.sleeve?{recognition:{sleeve:input.sleeve}}:{}) } });
     if (photo) await tx.wardrobePhoto.update({where:{id:photo.id},data:{importedAt:new Date()}});
     return item;
   });
@@ -137,13 +145,20 @@ itemsRouter.post('/', async (req, res) => {
 });
 
 itemsRouter.patch('/:id', async (req, res) => {
-  await findOwnItem(req.userId!, req.params.id);
+  const previous=await findOwnItem(req.userId!, req.params.id);
   const parsed = itemSchema.partial().parse(req.body);
   // Zod defaults must not overwrite unrelated details during a partial edit.
   const input = Object.fromEntries(Object.entries(parsed).filter(([key]) => Object.hasOwn(req.body, key))) as Partial<ItemInput>;
-  await assertOwnImage(req.userId!, input.image_url);
-  const item = await prisma.clothingItem.update({ where: { id: req.params.id }, data: toDb(input) });
+  if(input.image_url!==previous.imageUrl)await assertOwnImage(req.userId!, input.image_url);
+  const item = await prisma.clothingItem.update({ where: { id: req.params.id }, data: {...toDb(input),...(input.sleeve?{recognition:{...(previous.recognition as Prisma.JsonObject??{}),sleeve:input.sleeve}}:{})} });
+  if(previous.recognition&&['product_name','subcategory','category','color'].some(key=>Object.hasOwn(input,key)))await confirmLabels(req.userId!,item.id);
   res.json({ item: toClient(item) });
+});
+
+itemsRouter.post('/:id/confirm',async(req,res)=>{
+ await confirmLabels(req.userId!,req.params.id);
+ const item=await findOwnItem(req.userId!,req.params.id);
+ res.json({item:toClient(item)});
 });
 
 // Log that the item was worn today (feeds "never worn" and rotation insights).
